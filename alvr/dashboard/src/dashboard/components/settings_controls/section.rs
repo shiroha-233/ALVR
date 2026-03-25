@@ -5,6 +5,7 @@ use alvr_gui_common::{
         OK_GREEN,
         log_colors::{INFO_LIGHT, WARNING_LIGHT},
     },
+    tr,
 };
 use alvr_packets::PathValuePair;
 use alvr_session::settings_schema::{SchemaEntry, SchemaNode};
@@ -116,25 +117,28 @@ impl Control {
 
                     if let Some(string) = &entry.help {
                         ui.colored_label(INFO_LIGHT, "❓")
-                            .on_hover_text_at_pointer(string);
+                            .on_hover_text_at_pointer(tr(string).into_owned());
                     }
                     if entry.steamvr_restart_flag {
                         ui.colored_label(WARNING_LIGHT, "⚠")
                             .on_hover_text_at_pointer(
-                                "Changing this setting will make SteamVR restart!\n\
-                                Please save your in-game progress first",
+                                tr(
+                                    "Changing this setting will make SteamVR restart!\nPlease save your in-game progress first",
+                                )
+                                .into_owned(),
                             );
                     }
                     if entry.real_time_flag {
                         // The emoji is blue but it will be green in the UI
                         ui.colored_label(OK_GREEN, "🔵").on_hover_text_at_pointer(
-                            "This setting can be changed in real-time during streaming!",
+                            tr("This setting can be changed in real-time during streaming!")
+                                .into_owned(),
                         );
                     }
                 });
 
                 if let Some(string) = &entry.notice {
-                    notice::notice(ui, string);
+                    notice::notice(ui, &tr(string).into_owned());
 
                     ui.end_row();
 

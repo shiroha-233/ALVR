@@ -1,4 +1,5 @@
 use super::{NestingInfo, SettingControl, reset};
+use alvr_gui_common::tr;
 use alvr_packets::PathValuePair;
 use alvr_session::settings_schema::SchemaNode;
 use eframe::{
@@ -21,9 +22,9 @@ impl Control {
         schema_content: SchemaNode,
     ) -> Self {
         let default_string = if default_enabled {
-            "ON".into()
+            tr("ON").into_owned()
         } else {
-            "OFF".into()
+            tr("OFF").into_owned()
         };
 
         let control = {

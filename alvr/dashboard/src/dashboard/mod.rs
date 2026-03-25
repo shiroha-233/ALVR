@@ -12,14 +12,15 @@ use alvr_common::{
     parking_lot::{Condvar, Mutex},
 };
 use alvr_events::EventType;
-use alvr_gui_common::theme;
+use alvr_gui_common::{Language, current_language, set_current_language, theme, tr};
 use alvr_packets::{ClientConnectionsAction, PathValuePair};
 use alvr_session::SessionConfig;
 use eframe::egui::{
-    self, Align, CentralPanel, Direction, Frame, Layout, Margin, RichText, SidePanel,
+    self, Align, CentralPanel, ComboBox, Direction, Frame, Layout, Margin, RichText, SidePanel,
+    ViewportCommand,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ServerRequest {
@@ -61,8 +62,8 @@ pub struct Dashboard {
     just_opened: bool,
     server_restarting: Arc<Mutex<bool>>,
     server_restarting_condvar: Arc<Condvar>,
+    language: Language,
     selected_tab: Tab,
-    tab_labels: BTreeMap<Tab, &'static str>,
     connections_tab: DevicesTab,
     statistics_tab: StatisticsTab,
     settings_tab: SettingsTab,
@@ -77,8 +78,24 @@ pub struct Dashboard {
 }
 
 impl Dashboard {
+    fn tab_label(&self, tab: Tab) -> String {
+        match tab {
+            Tab::Devices => format!("🔌  {}", tr("Devices")),
+            Tab::Statistics => format!("📈  {}", tr("Statistics")),
+            Tab::Settings => format!("🔧  {}", tr("Settings")),
+            #[cfg(not(target_arch = "wasm32"))]
+            Tab::Installation => format!("💾  {}", tr("Installation")),
+            Tab::Logs => format!("📝  {}", tr("Logs")),
+            Tab::Debug => format!("🐞  {}", tr("Debug")),
+            Tab::About => format!("ℹ  {}", tr("About")),
+        }
+    }
+
     pub fn new(creation_context: &eframe::CreationContext<'_>, data_sources: DataSources) -> Self {
         alvr_gui_common::theme::set_theme(&creation_context.egui_ctx);
+
+        let language = current_language();
+        set_current_language(language);
 
         data_sources.request(ServerRequest::GetSession);
 
@@ -87,19 +104,8 @@ impl Dashboard {
             just_opened: true,
             server_restarting: Arc::new(Mutex::new(false)),
             server_restarting_condvar: Arc::new(Condvar::new()),
+            language,
             selected_tab: Tab::Devices,
-            tab_labels: [
-                (Tab::Devices, "🔌  Devices"),
-                (Tab::Statistics, "📈  Statistics"),
-                (Tab::Settings, "🔧  Settings"),
-                #[cfg(not(target_arch = "wasm32"))]
-                (Tab::Installation, "💾  Installation"),
-                (Tab::Logs, "📝  Logs"),
-                (Tab::Debug, "🐞  Debug"),
-                (Tab::About, "ℹ  About"),
-            ]
-            .into_iter()
-            .collect(),
             connections_tab: DevicesTab::new(),
             statistics_tab: StatisticsTab::new(),
             settings_tab: SettingsTab::new(),
@@ -143,7 +149,10 @@ impl Dashboard {
 
 impl eframe::App for Dashboard {
     fn update(&mut self, context: &egui::Context, _: &mut eframe::Frame) {
+        set_current_language(self.language);
+
         let mut requests = vec![];
+        let previous_language = self.language;
 
         let connected_to_server = self.data_sources.server_connected();
 
@@ -199,7 +208,7 @@ impl eframe::App for Dashboard {
                 // todo: find a way to center both vertically and horizontally
                 ui.vertical_centered(|ui| {
                     ui.add_space(100.0);
-                    ui.heading(RichText::new("SteamVR is restarting").size(30.0));
+                    ui.heading(RichText::new(tr("SteamVR is restarting").into_owned()).size(30.0));
                 });
             });
 
@@ -245,12 +254,54 @@ impl eframe::App for Dashboard {
                     ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
                         ui.add_space(13.0);
                         ui.heading(RichText::new("ALVR").size(25.0).strong());
+                        ui.label(tr("Language").as_ref());
+                        ComboBox::from_id_salt("dashboard-language")
+                            .selected_text(self.language.label())
+                            .show_ui(ui, |ui| {
+                                for language in Language::ALL {
+                                    ui.selectable_value(
+                                        &mut self.language,
+                                        language,
+                                        language.label(),
+                                    );
+                                }
+                            });
                         egui::warn_if_debug_build(ui);
                     });
 
+                    set_current_language(self.language);
+
+                    if self.language != previous_language {
+                        self.settings_tab = SettingsTab::new();
+                        if let Some(session) = &self.session {
+                            let settings = session.to_settings();
+
+                            self.settings_tab.update_session(&session.session_settings);
+                            self.logs_tab.update_settings(&settings);
+                            self.notification_bar.update_settings(&settings);
+                        }
+
+                        let title = if matches!(self.language, Language::Chinese) {
+                            format!("ALVR 控制面板（串流端 v{}）", *alvr_common::ALVR_VERSION)
+                        } else {
+                            format!("ALVR Dashboard (streamer v{})", *alvr_common::ALVR_VERSION)
+                        };
+                        context.send_viewport_cmd(ViewportCommand::Title(title));
+                    }
+
                     ui.with_layout(Layout::top_down_justified(Align::Min), |ui| {
-                        for (tab, label) in &self.tab_labels {
-                            ui.selectable_value(&mut self.selected_tab, *tab, *label);
+                        for tab in [
+                            Tab::Devices,
+                            Tab::Statistics,
+                            Tab::Settings,
+                            #[cfg(not(target_arch = "wasm32"))]
+                            Tab::Installation,
+                            Tab::Logs,
+                            Tab::Debug,
+                            Tab::About,
+                        ] {
+                            let label = self.tab_label(tab);
+                            ui.selectable_value(&mut self.selected_tab, tab, label);
                         }
                     });
 
@@ -261,25 +312,27 @@ impl eframe::App for Dashboard {
                             ui.add_space(5.0);
 
                             if connected_to_server {
-                                if ui.button("Restart SteamVR").clicked() {
+                                if ui.button(tr("Restart SteamVR").as_ref()).clicked() {
                                     self.restart_steamvr(&mut requests);
                                 }
-                            } else if ui.button("Launch SteamVR").clicked() {
+                            } else if ui.button(tr("Launch SteamVR").as_ref()).clicked() {
                                 crate::steamvr_launcher::LAUNCHER.lock().launch_steamvr();
                             }
 
                             ui.horizontal(|ui| {
                                 ui.add_space(4.0);
-                                ui.label(RichText::new("SteamVR:").size(13.0));
+                                ui.label(RichText::new(tr("SteamVR:").into_owned()).size(13.0));
                                 ui.add_space(-10.0);
                                 ui.with_layout(
                                     Layout::centered_and_justified(Direction::LeftToRight),
                                     |ui| {
                                         ui.label(
                                             if connected_to_server {
-                                                RichText::new("Connected").color(theme::OK_GREEN)
+                                                RichText::new(tr("Connected").into_owned())
+                                                    .color(theme::OK_GREEN)
                                             } else {
-                                                RichText::new("Disconnected").color(theme::KO_RED)
+                                                RichText::new(tr("Disconnected").into_owned())
+                                                    .color(theme::KO_RED)
                                             }
                                             .size(13.0),
                                         )
@@ -294,7 +347,7 @@ impl eframe::App for Dashboard {
                 .frame(Frame::new().inner_margin(Margin::same(20)).fill(theme::BG))
                 .show(context, |ui| {
                     ui.with_layout(Layout::top_down_justified(Align::LEFT), |ui| {
-                        ui.heading(RichText::new(self.tab_labels[&self.selected_tab]).size(25.0));
+                        ui.heading(RichText::new(self.tab_label(self.selected_tab)).size(25.0));
                         match self.selected_tab {
                             Tab::Devices => {
                                 requests.extend(self.connections_tab.ui(ui, connected_to_server));

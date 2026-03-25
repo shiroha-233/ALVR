@@ -1,4 +1,5 @@
 use super::NestingInfo;
+use alvr_gui_common::tr;
 use alvr_packets::PathValuePair;
 use eframe::egui::Ui;
 use serde_json as json;
@@ -13,8 +14,8 @@ pub fn collapsible_button(
         unreachable!()
     };
 
-    if (*state_mut && ui.small_button("Expand").clicked())
-        || (!*state_mut && ui.small_button("Collapse").clicked())
+    if (*state_mut && ui.small_button(tr("Expand").as_ref()).clicked())
+        || (!*state_mut && ui.small_button(tr("Collapse").as_ref()).clicked())
     {
         *state_mut = !*state_mut;
         *request = super::get_single_value(

@@ -1,5 +1,8 @@
 use alvr_common::{LogEntry, LogSeverity};
-use alvr_gui_common::theme::{self, log_colors};
+use alvr_gui_common::{
+    theme::{self, log_colors},
+    tr,
+};
 use alvr_session::Settings;
 use eframe::{
     egui::{self, Frame, Label, Layout, RichText, TextWrapMode, TopBottomPanel},
@@ -59,7 +62,7 @@ pub struct NotificationBar {
 impl NotificationBar {
     pub fn new() -> Self {
         Self {
-            message: NO_NOTIFICATIONS_MESSAGE.into(),
+            message: tr(NO_NOTIFICATIONS_MESSAGE).into_owned(),
             current_level: LogSeverity::Debug,
             receive_instant: Instant::now(),
             min_notification_level: LogSeverity::Debug,
@@ -75,7 +78,7 @@ impl NotificationBar {
             if self.tip_message.is_none() {
                 self.tip_message = NOTIFICATION_TIPS
                     .choose(&mut rand::rng())
-                    .map(|s| format!("Tip: {s}"));
+                    .map(|s| format!("{}: {}", tr("Tip").as_ref(), tr(s).as_ref()));
             }
         } else {
             self.tip_message = None;
@@ -109,7 +112,7 @@ impl NotificationBar {
             self.message = self
                 .tip_message
                 .clone()
-                .unwrap_or_else(|| NO_NOTIFICATIONS_MESSAGE.into());
+                .unwrap_or_else(|| tr(NO_NOTIFICATIONS_MESSAGE).into_owned());
             self.current_level = LogSeverity::Debug;
         }
 
@@ -141,10 +144,10 @@ impl NotificationBar {
         bottom_bar.show(context, |ui| {
             ui.with_layout(Layout::right_to_left(alignment), |ui| {
                 if !self.expanded {
-                    if ui.small_button("Expand").clicked() {
+                    if ui.small_button(tr("Expand").as_ref()).clicked() {
                         self.expanded = true;
                     }
-                } else if ui.button("Reduce").clicked() {
+                } else if ui.button(tr("Reduce").as_ref()).clicked() {
                     self.expanded = false;
                 }
                 ui.with_layout(Layout::left_to_right(alignment), |ui| {

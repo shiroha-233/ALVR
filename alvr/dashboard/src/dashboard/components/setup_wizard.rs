@@ -1,4 +1,5 @@
 use crate::dashboard::ServerRequest;
+use alvr_gui_common::tr;
 use eframe::{
     egui::{Button, Label, Layout, RichText, Ui},
     emath::Align,
@@ -72,7 +73,7 @@ impl SetupWizard {
             ui.add_space(60.0);
             ui.vertical(|ui| {
                 ui.add_space(30.0);
-                ui.heading(RichText::new("Welcome to ALVR").size(30.0));
+                ui.heading(RichText::new(tr("Welcome to ALVR").into_owned()).size(30.0));
                 ui.add_space(5.0);
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -86,16 +87,16 @@ impl SetupWizard {
         match &self.page {
             Page::Welcome => page_content(
                 ui,
-                "This setup wizard will help you setup ALVR.",
+                tr("This setup wizard will help you setup ALVR.").as_ref(),
                 "",
                 |_| (),
             ),
             Page::ResetSettings => page_content(
                 ui,
-                "Reset settings",
-                "It is recommended to reset your settings everytime you update ALVR.",
+                tr("Reset settings").as_ref(),
+                tr("It is recommended to reset your settings everytime you update ALVR.").as_ref(),
                 |ui| {
-                    if ui.button("Reset settings").clicked() {
+                    if ui.button(tr("Reset settings").as_ref()).clicked() {
                         request = Some(SetupWizardRequest::ServerRequest(
                             ServerRequest::UpdateSession(Box::default()),
                         ));
@@ -104,38 +105,54 @@ impl SetupWizard {
             ),
             Page::HardwareRequirements => page_content(
                 ui,
-                "Hardware requirements",
-                r"ALVR requires a dedicated and recent graphics card. Low-end Intel integrated graphics may fail to work.
+                tr("Hardware requirements").as_ref(),
+                tr(
+                    "ALVR requires a dedicated and recent graphics card. Low-end Intel integrated graphics may fail to work.
 Make sure you have at least one output audio device.",
+                )
+                .as_ref(),
                 |_| (),
             ),
-            Page::SoftwareRequirements => page_content(
-                ui,
-                "Software requirements",
-                if cfg!(windows) {
-                    r"To stream the headset microphone on Windows you need to install Virtual Audio Cable, VB-Cable, Voicemeeter"
+            Page::SoftwareRequirements => {
+                let paragraph = if cfg!(windows) {
+                    tr(
+                        "To stream the headset microphone on Windows you need to install Virtual Audio Cable, VB-Cable, Voicemeeter",
+                    )
+                    .into_owned()
                 } else if cfg!(target_os = "linux") {
-                    r"You need the PipeWire (0.3.49+ version) audio system to be able to stream audio and use microphone."
+                    tr(
+                        "You need the PipeWire (0.3.49+ version) audio system to be able to stream audio and use microphone.",
+                    )
+                    .into_owned()
                 } else {
-                    r"Unsupported OS"
-                },
-                #[allow(unused_variables)]
-                |ui| {
-                    #[cfg(windows)]
-                    if ui.button("Download Virtual Audio Cable (Lite)").clicked() {
-                        ui.ctx().open_url(eframe::egui::OpenUrl::same_tab(
-                            "https://software.muzychenko.net/freeware/vac470lite.zip",
-                        ));
-                    }
-                },
-            ),
+                    tr("Unsupported OS").into_owned()
+                };
+
+                page_content(
+                    ui,
+                    tr("Software requirements").as_ref(),
+                    &paragraph,
+                    #[allow(unused_variables)]
+                    |ui| {
+                        #[cfg(windows)]
+                        if ui.button(tr("Download Virtual Audio Cable (Lite)").as_ref()).clicked() {
+                            ui.ctx().open_url(eframe::egui::OpenUrl::same_tab(
+                                "https://software.muzychenko.net/freeware/vac470lite.zip",
+                            ));
+                        }
+                    },
+                )
+            }
             Page::Firewall => page_content(
                 ui,
-                "Firewall",
-                r"To communicate with the headset, some firewall rules need to be set.
+                tr("Firewall").as_ref(),
+                tr(
+                    "To communicate with the headset, some firewall rules need to be set.
 This requires administrator rights!",
+                )
+                .as_ref(),
                 |ui| {
-                    if ui.button("Add firewall rules").clicked() {
+                    if ui.button(tr("Add firewall rules").as_ref()).clicked() {
                         request = Some(SetupWizardRequest::ServerRequest(
                             ServerRequest::AddFirewallRules,
                         ));
@@ -144,14 +161,17 @@ This requires administrator rights!",
             ),
             Page::Recommendations => page_content(
                 ui,
-                "Recommendations",
-                r"ALVR supports multiple types of PC hardware and headsets but not all might work correctly with default settings. Please try tweaking different settings like resolution, bitrate, encoder and others if your ALVR experience is not optimal.",
+                tr("Recommendations").as_ref(),
+                tr(
+                    "ALVR supports multiple types of PC hardware and headsets but not all might work correctly with default settings. Please try tweaking different settings like resolution, bitrate, encoder and others if your ALVR experience is not optimal.",
+                )
+                .as_ref(),
                 |_| (),
             ),
             Page::Finished => page_content(
                 ui,
-                "Finished",
-                r#"You can always restart this setup wizard from the "Installation" tab on the left."#,
+                tr("Finished").as_ref(),
+                tr(r#"You can always restart this setup wizard from the "Installation" tab on the left."#).as_ref(),
                 |_| (),
             ),
         };
@@ -161,14 +181,14 @@ This requires administrator rights!",
             ui.horizontal(|ui| {
                 ui.add_space(15.0);
                 if self.page == Page::Finished {
-                    if ui.button("Finish").clicked() {
+                    if ui.button(tr("Finish").as_ref()).clicked() {
                         request = Some(SetupWizardRequest::Close { finished: true });
                     }
-                } else if ui.button("Next").clicked() {
+                } else if ui.button(tr("Next").as_ref()).clicked() {
                     self.page = index_to_page(self.page as usize + 1);
                 }
                 if ui
-                    .add_visible(self.page != Page::Welcome, Button::new("Back"))
+                    .add_visible(self.page != Page::Welcome, Button::new(tr("Back").as_ref()))
                     .clicked()
                 {
                     self.page = index_to_page(self.page as usize - 1);

@@ -32,6 +32,7 @@ fn main() {
     use alvr_common::ALVR_VERSION;
     use alvr_common::info;
     use alvr_filesystem as afs;
+    use alvr_gui_common::{Language, current_language};
     use eframe::{
         NativeOptions,
         egui::{IconData, ViewportBuilder},
@@ -84,8 +85,14 @@ fn main() {
         unsafe { env::set_var("WINIT_X11_SCALE_FACTOR", "1") };
     }
 
+    let title = if matches!(current_language(), Language::Chinese) {
+        format!("ALVR 控制面板（串流端 v{}）", *ALVR_VERSION)
+    } else {
+        format!("ALVR Dashboard (streamer v{})", *ALVR_VERSION)
+    };
+
     eframe::run_native(
-        &format!("ALVR Dashboard (streamer v{})", *ALVR_VERSION),
+        &title,
         NativeOptions {
             viewport: ViewportBuilder::default()
                 .with_app_id("alvr.dashboard")

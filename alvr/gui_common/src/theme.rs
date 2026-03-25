@@ -1,4 +1,8 @@
-use egui::{self, Color32, Context, CornerRadius, Stroke, TextStyle, ThemePreference, Visuals};
+use egui::{
+    self, Color32, Context, CornerRadius, FontData, FontDefinitions, FontFamily, Stroke, TextStyle,
+    ThemePreference, Visuals,
+};
+use std::{fs, sync::Arc};
 
 pub const ACCENT: Color32 = Color32::from_rgb(0, 76, 176);
 pub const BG: Color32 = Color32::from_rgb(30, 30, 30);
@@ -50,8 +54,50 @@ pub mod graph_colors {
     pub const RECORDED_BITRATE: Color32 = super::FG;
 }
 
+fn maybe_load_cjk_fonts(ctx: &Context) {
+    let font_paths = if cfg!(windows) {
+        vec![
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/msyh.ttf",
+            "C:/Windows/Fonts/msjh.ttc",
+            "C:/Windows/Fonts/simhei.ttf",
+        ]
+    } else if cfg!(target_os = "linux") {
+        vec![
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.otf",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/truetype/arphic/ukai.ttc",
+        ]
+    } else {
+        Vec::new()
+    };
+
+    let Some(bytes) = font_paths.iter().find_map(|path| fs::read(path).ok()) else {
+        return;
+    };
+
+    let mut fonts = FontDefinitions::default();
+    let font_name = "alvr_cjk_fallback".to_owned();
+    fonts
+        .font_data
+        .insert(font_name.clone(), Arc::new(FontData::from_owned(bytes)));
+
+    if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
+        family.push(font_name.clone());
+    }
+    if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
+        family.push(font_name);
+    }
+
+    ctx.set_fonts(fonts);
+}
+
 pub fn set_theme(ctx: &Context) {
     ctx.set_theme(ThemePreference::Dark);
+    maybe_load_cjk_fonts(ctx);
 
     let mut style = (*ctx.style()).clone();
     style.spacing.slider_width = 200_f32; // slider width can only be set globally

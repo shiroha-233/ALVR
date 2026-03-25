@@ -45,6 +45,8 @@ pub struct InstallationInfo {
 }
 
 fn main() {
+    let title = alvr_gui_common::tr("ALVR Launcher").into_owned();
+
     let (worker_message_sender, worker_message_receiver) = mpsc::channel::<WorkerMessage>();
     let (ui_message_sender, ui_message_receiver) = mpsc::channel::<UiMessage>();
 
@@ -66,7 +68,7 @@ fn main() {
     }
 
     eframe::run_native(
-        "ALVR Launcher",
+        &title,
         eframe::NativeOptions {
             viewport: ViewportBuilder::default()
                 .with_app_id("alvr.launcher")

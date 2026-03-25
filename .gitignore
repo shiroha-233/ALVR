@@ -73,3 +73,14 @@ CMakeLists.txt
 cmake-build-debug/
 
 *.jks
+
+# local Android/YVR downloaded artifacts
+Androidcmdline-tools.zip
+platform-tools.zip
+yvr_sdk.zip
+platform-tools/
+yvr_openxr_mobile_sdk_2.0.0/
+__MACOSX/
+
+# accidental Windows special-name artifact
+nul

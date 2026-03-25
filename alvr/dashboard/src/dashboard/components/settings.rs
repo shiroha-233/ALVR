@@ -3,7 +3,7 @@ use super::{
     presets::{PresetControl, builtin_schema},
 };
 use crate::dashboard::ServerRequest;
-use alvr_gui_common::{DisplayString, theme};
+use alvr_gui_common::{DisplayString, theme, tr};
 use alvr_session::{SessionSettings, Settings};
 use eframe::egui::{Align, Frame, Grid, Layout, RichText, ScrollArea, Ui};
 #[cfg(target_arch = "wasm32")]
@@ -131,7 +131,9 @@ impl SettingsTab {
                         ui.selectable_value(
                             &mut self.selected_top_tab_id,
                             "presets".into(),
-                            RichText::new("Presets").raised().size(15.0),
+                            RichText::new(tr("Presets").into_owned())
+                                .raised()
+                                .size(15.0),
                         );
                         for entry in &mut self.top_level_entries {
                             ui.selectable_value(

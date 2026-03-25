@@ -1,6 +1,6 @@
 use crate::dashboard::{ServerRequest, theme::graph_colors};
 use alvr_events::{GraphStatistics, StatisticsSummary};
-use alvr_gui_common::theme;
+use alvr_gui_common::{theme, tr};
 use eframe::{
     egui::{
         Align2, Color32, CornerRadius, FontId, Frame, Grid, Painter, Rect, RichText, ScrollArea,
@@ -54,8 +54,9 @@ impl StatisticsTab {
             });
         } else {
             ui.heading(
-                "No statistics available. 
-            Start SteamVR and connect to a device to gather statistics.",
+                tr("No statistics available.
+Start SteamVR and connect to a device to gather statistics.")
+                .into_owned(),
             );
         }
 
@@ -72,7 +73,7 @@ impl StatisticsTab {
         tooltip_content: impl FnOnce(&mut Ui, &GraphStatistics),
     ) {
         ui.add_space(10.0);
-        ui.label(RichText::new(title).size(20.0));
+        ui.label(RichText::new(tr(title).into_owned()).size(20.0));
 
         let canvas_response = Frame::canvas(ui.style()).show(ui, |ui| {
             ui.ctx().request_repaint();
@@ -167,7 +168,7 @@ impl StatisticsTab {
 
                 Grid::new("latency_tooltip").num_columns(2).show(ui, |ui| {
                     fn label(ui: &mut Ui, text: &str, value_s: f32, color: Color32) {
-                        ui.colored_label(color, text);
+                        ui.colored_label(color, tr(text).as_ref());
                         ui.colored_label(color, format!("{:.2}ms", value_s * 1000.0));
                         ui.end_row();
                     }
@@ -250,7 +251,7 @@ impl StatisticsTab {
             |ui, stats| {
                 Grid::new("fps_tooltip").num_columns(2).show(ui, |ui| {
                     fn label(ui: &mut Ui, text: &str, value: f32, color: Color32) {
-                        ui.colored_label(color, text);
+                        ui.colored_label(color, tr(text).as_ref());
                         ui.colored_label(color, format!("{value:.2}Hz"));
                         ui.end_row();
                     }
@@ -362,7 +363,7 @@ impl StatisticsTab {
                         color: Color32,
                     ) {
                         if let Some(value) = maybe_value_bps {
-                            ui.colored_label(color, text);
+                            ui.colored_label(color, tr(text).as_ref());
                             ui.colored_label(color, format!("{:.2} Mbps", value / 1e6));
                             ui.end_row();
                         }
@@ -427,7 +428,10 @@ impl StatisticsTab {
                     );
                 });
 
-                ui.small("Note: throughput is the peak bitrate, packet_size/network_latency.");
+                ui.small(
+                    tr("Note: throughput is the peak bitrate, packet_size/network_latency.")
+                        .into_owned(),
+                );
             },
         )
     }
@@ -436,44 +440,44 @@ impl StatisticsTab {
         ui.add_space(10.0);
 
         ui.columns(2, |ui| {
-            ui[0].label("Total packets:");
+            ui[0].label(tr("Total packets:").as_ref());
             ui[1].label(format!(
                 "{} packets ({} packets/s)",
                 statistics.video_packets_total, statistics.video_packets_per_sec
             ));
 
-            ui[0].label("Total sent:");
+            ui[0].label(tr("Total sent:").as_ref());
             ui[1].label(format!("{} MB", statistics.video_mbytes_total));
 
-            ui[0].label("Bitrate:");
+            ui[0].label(tr("Bitrate:").as_ref());
             ui[1].label(format!("{:.1} Mbps", statistics.video_mbits_per_sec));
 
-            ui[0].label("Total latency:");
+            ui[0].label(tr("Total latency:").as_ref());
             ui[1].label(format!("{:.0} ms", statistics.total_latency_ms));
 
-            ui[0].label("Encoder latency:");
+            ui[0].label(tr("Encoder latency:").as_ref());
             ui[1].label(format!("{:.2} ms", statistics.encode_latency_ms));
 
-            ui[0].label("Transport latency:");
+            ui[0].label(tr("Transport latency:").as_ref());
             ui[1].label(format!("{:.2} ms", statistics.network_latency_ms));
 
-            ui[0].label("Decoder latency:");
+            ui[0].label(tr("Decoder latency:").as_ref());
             ui[1].label(format!("{:.2} ms", statistics.decode_latency_ms));
 
-            ui[0].label("Client FPS:");
+            ui[0].label(tr("Client FPS:").as_ref());
             ui[1].label(format!("{} FPS", statistics.client_fps));
 
-            ui[0].label("Streamer FPS:");
+            ui[0].label(tr("Streamer FPS:").as_ref());
             ui[1].label(format!("{} FPS", statistics.server_fps));
 
-            ui[0].label("Headset battery");
+            ui[0].label(tr("Headset battery").as_ref());
             ui[1].label(format!(
                 "{}% ({})",
                 statistics.battery_hmd,
                 if statistics.hmd_plugged {
-                    "plugged"
+                    tr("plugged").into_owned()
                 } else {
-                    "unplugged"
+                    tr("unplugged").into_owned()
                 }
             ));
         });

@@ -1,3 +1,4 @@
+use crate::{Language, tr};
 use egui::{Align, Align2, Context, Layout, Ui, Window};
 use std::fmt::{self, Display, Formatter};
 
@@ -20,16 +21,28 @@ impl Display for ModalButton {
     }
 }
 
+impl ModalButton {
+    pub fn label(&self, language: Language) -> String {
+        match self {
+            Self::Ok => language.translate("OK").into_owned(),
+            Self::Cancel => language.translate("Cancel").into_owned(),
+            Self::Close => language.translate("Close").into_owned(),
+            Self::Custom(text) => language.translate(text).into_owned(),
+        }
+    }
+}
+
 pub fn modal(
     context: &Context,
     title: &str,
     content: Option<impl FnOnce(&mut Ui)>,
     buttons: &[ModalButton],
     width: Option<f32>,
+    language: Language,
 ) -> Option<ModalButton> {
     let mut response = None;
 
-    let mut window = Window::new(title)
+    let mut window = Window::new(tr(title).into_owned())
         .anchor(Align2::CENTER_CENTER, (0.0, 0.0))
         .collapsible(false)
         .resizable(false);
@@ -49,7 +62,7 @@ pub fn modal(
             ui.columns(buttons.len(), |cols| {
                 for (idx, response_type) in buttons.iter().enumerate() {
                     cols[idx].with_layout(Layout::top_down_justified(Align::Center), |ui| {
-                        if ui.button(response_type.to_string()).clicked() {
+                        if ui.button(response_type.label(language)).clicked() {
                             response = Some(response_type.clone());
                         }
                     });

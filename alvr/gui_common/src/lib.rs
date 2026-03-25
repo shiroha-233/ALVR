@@ -1,7 +1,9 @@
 mod basic_components;
+pub mod i18n;
 pub mod theme;
 
 pub use basic_components::*;
+pub use i18n::*;
 
 use std::{ops::Deref, sync::atomic::AtomicUsize};
 
