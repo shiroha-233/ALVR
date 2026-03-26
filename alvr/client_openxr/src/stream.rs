@@ -12,7 +12,9 @@ use alvr_common::{
     anyhow::Result,
     error,
     glam::{UVec2, Vec2},
-    parking_lot::RwLock,
+    info,
+    parking_lot::{Mutex, RwLock},
+    warn,
 };
 use alvr_graphics::{GraphicsContext, StreamRenderer, StreamViewParams};
 use alvr_packets::{RealTimeConfig, StreamConfig, TrackingData};
@@ -25,12 +27,57 @@ use openxr as xr;
 use std::{
     ptr,
     rc::Rc,
-    sync::Arc,
+    sync::atomic::{AtomicU64, Ordering},
+    sync::{Arc, LazyLock},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
 const DECODER_MAX_TIMEOUT_MULTIPLIER: f32 = 0.8;
+const YVR_DEBUG_LOG_INTERVAL: Duration = Duration::from_millis(500);
+
+static LAST_YVR_TRACKING_DEBUG_LOG: LazyLock<Mutex<Instant>> =
+    LazyLock::new(|| Mutex::new(Instant::now()));
+static LAST_YVR_RENDER_DEBUG_LOG: LazyLock<Mutex<Instant>> =
+    LazyLock::new(|| Mutex::new(Instant::now()));
+static YVR_XR_TIME_BIAS_NANOS: AtomicU64 = AtomicU64::new(0);
+
+fn format_view_params(view: ViewParams) -> String {
+    format!(
+        "pos=[{:.4},{:.4},{:.4}] q=[{:.4},{:.4},{:.4},{:.4}] fov=[l:{:.1} r:{:.1} u:{:.1} d:{:.1}]",
+        view.pose.position.x,
+        view.pose.position.y,
+        view.pose.position.z,
+        view.pose.orientation.x,
+        view.pose.orientation.y,
+        view.pose.orientation.z,
+        view.pose.orientation.w,
+        view.fov.left.to_degrees(),
+        view.fov.right.to_degrees(),
+        view.fov.up.to_degrees(),
+        view.fov.down.to_degrees(),
+    )
+}
+
+fn should_log_yvr_debug(last_log: &LazyLock<Mutex<Instant>>) -> bool {
+    let now = Instant::now();
+    let mut last_log = last_log.lock();
+
+    if *last_log + YVR_DEBUG_LOG_INTERVAL < now {
+        *last_log = now;
+
+        true
+    } else {
+        false
+    }
+}
+
+fn yvr_corrected_now(xr_session: &xr::Session<xr::OpenGlEs>) -> Option<Duration> {
+    let raw_now = crate::xr_runtime_now(xr_session.instance()).map(crate::from_xr_time)?;
+    let bias_nanos = YVR_XR_TIME_BIAS_NANOS.load(Ordering::Relaxed);
+
+    Some(raw_now + Duration::from_nanos(bias_nanos))
+}
 
 pub struct ParsedStreamConfig {
     pub view_resolution: UVec2,
@@ -336,6 +383,7 @@ impl StreamContext {
     pub fn update_real_time_config(&mut self, config: &RealTimeConfig) {
         self.config.passthrough = config.passthrough.clone();
         self.config.clientside_post_processing = config.clientside_post_processing.clone();
+        self.use_custom_reprojection = self.core_context.platform().is_yvr();
     }
 
     pub fn render(
@@ -391,6 +439,16 @@ impl StreamContext {
         } else {
             vec![crate::default_view(), crate::default_view()]
         };
+        let runtime_view_params = [
+            ViewParams {
+                pose: crate::from_xr_pose(current_headset_views[0].pose),
+                fov: crate::from_xr_fov(current_headset_views[0].fov),
+            },
+            ViewParams {
+                pose: crate::from_xr_pose(current_headset_views[1].pose),
+                fov: crate::from_xr_fov(current_headset_views[1].fov),
+            },
+        ];
 
         // The poses and FoVs we received from the PC runtime, which may differ and/or include
         // altered FoVs based on settings and view conversions done for canting.
@@ -407,18 +465,28 @@ impl StreamContext {
         // correctly, but if we do trust them, avoid doing rotation ourselves. Otherwise, rerender.
         // Ex: YVR/PFDMR has issues with aspect ratio mismatches and passthrough compositing.
         if self.use_custom_reprojection {
-            output_view_params = [
-                ViewParams {
-                    pose: crate::from_xr_pose(current_headset_views[0].pose),
-                    fov: crate::from_xr_fov(current_headset_views[0].fov),
-                },
-                ViewParams {
-                    pose: crate::from_xr_pose(current_headset_views[1].pose),
-                    fov: crate::from_xr_fov(current_headset_views[1].fov),
-                },
-            ];
+            output_view_params = runtime_view_params;
 
             openxr_display_time = vsync_time;
+        }
+
+        if self.core_context.platform().is_yvr() && should_log_yvr_debug(&LAST_YVR_RENDER_DEBUG_LOG)
+        {
+            info!(
+                "YVR TRACE client prerender: has_frame={} frame_ts={timestamp:?} frame_age={:?} \
+                 vsync_time={vsync_time:?} display_time={openxr_display_time:?} \
+                 custom_reprojection={} input_l={} input_r={} runtime_l={} runtime_r={} \
+                 output_l={} output_r={}",
+                !buffer_ptr.is_null(),
+                vsync_time.saturating_sub(timestamp),
+                self.use_custom_reprojection,
+                format_view_params(input_view_params[0]),
+                format_view_params(input_view_params[1]),
+                format_view_params(runtime_view_params[0]),
+                format_view_params(runtime_view_params[1]),
+                format_view_params(output_view_params[0]),
+                format_view_params(output_view_params[1]),
+            );
         }
 
         self.renderer.render(
@@ -441,13 +509,55 @@ impl StreamContext {
         self.swapchains[0].release_image().unwrap();
         self.swapchains[1].release_image().unwrap();
 
-        if !buffer_ptr.is_null()
-            && let Some(xr_now) = crate::xr_runtime_now(self.xr_session.instance())
-        {
-            self.core_context.report_submit(
-                timestamp,
-                vsync_time.saturating_sub(Duration::from_nanos(xr_now.as_nanos() as u64)),
-            );
+        if !buffer_ptr.is_null() {
+            if let Some(xr_now) = crate::xr_runtime_now(self.xr_session.instance()) {
+                let xr_now_duration = Duration::from_nanos(xr_now.as_nanos() as u64);
+                if self.core_context.platform().is_yvr() {
+                    let bias = vsync_time
+                        .saturating_sub(xr_now_duration)
+                        .saturating_sub(frame_interval);
+                    YVR_XR_TIME_BIAS_NANOS.store(bias.as_nanos() as u64, Ordering::Relaxed);
+                }
+
+                let corrected_now = if self.core_context.platform().is_yvr() {
+                    xr_now_duration
+                        + Duration::from_nanos(YVR_XR_TIME_BIAS_NANOS.load(Ordering::Relaxed))
+                } else {
+                    xr_now_duration
+                };
+                let mut vsync_queue = vsync_time.saturating_sub(xr_now_duration);
+
+                if self.core_context.platform().is_yvr() {
+                    vsync_queue = vsync_time.saturating_sub(corrected_now);
+                }
+
+                if self.core_context.platform().is_yvr() {
+                    let max_reasonable_vsync_queue = frame_interval + frame_interval;
+
+                    if vsync_queue > max_reasonable_vsync_queue {
+                        warn!(
+                            "YVR runtime returned an implausible vsync queue ({vsync_queue:?}), \
+                             clamping to one frame interval ({frame_interval:?})"
+                        );
+                        vsync_queue = frame_interval;
+                    }
+
+                    if should_log_yvr_debug(&LAST_YVR_RENDER_DEBUG_LOG) {
+                        info!(
+                            "YVR TRACE client render: has_frame=true frame_ts={timestamp:?} frame_age={:?} \
+                             vsync_time={vsync_time:?} xr_now={xr_now_duration:?} corrected_now={corrected_now:?} \
+                             display_time={openxr_display_time:?} vsync_queue={vsync_queue:?} \
+                             custom_reprojection={}",
+                            vsync_time.saturating_sub(timestamp),
+                            self.use_custom_reprojection,
+                        );
+                    }
+                }
+
+                self.core_context.report_submit(timestamp, vsync_queue);
+            } else if self.core_context.platform().is_yvr() {
+                warn!("YVR TRACE client render: xr_runtime_now unavailable while frame is present");
+            }
         }
 
         let rect = xr::Rect2Di {
@@ -538,13 +648,19 @@ fn stream_input_loop(
             return;
         }
 
-        let Some(now) = crate::xr_runtime_now(xr_session.instance()).map(crate::from_xr_time)
-        else {
+        let maybe_now = if core_ctx.platform().is_yvr() {
+            yvr_corrected_now(&xr_session)
+        } else {
+            crate::xr_runtime_now(xr_session.instance()).map(crate::from_xr_time)
+        };
+
+        let Some(now) = maybe_now else {
             error!("Cannot poll tracking: invalid time");
             return;
         };
 
-        let target_time = now + core_ctx.get_total_prediction_offset();
+        let prediction_offset = core_ctx.get_total_prediction_offset();
+        let target_time = now + prediction_offset;
 
         let Some((head_motion, local_views)) = interaction::get_head_data(
             &xr_session,
@@ -628,13 +744,18 @@ fn stream_input_loop(
             device_motions.append(&mut interaction::get_bd_motion_trackers(source, now));
         }
 
-        // Even though the server is already adding the motion-to-photon latency, here we use
-        // target_time as the poll_timestamp to compensate for the fact that video frames are sent
-        // with the poll timestamp instead of the vsync time. This is to ensure correctness when
-        // submitting frames to OpenXR. This won't cause any desync with the server because no time
-        // sync step is performed between client and server.
+        let poll_timestamp = target_time;
+
+        if core_ctx.platform().is_yvr() && should_log_yvr_debug(&LAST_YVR_TRACKING_DEBUG_LOG) {
+            info!(
+                "YVR DEBUG tracking: now={now:?} prediction_offset={prediction_offset:?} \
+                 target_time={target_time:?} poll_timestamp={poll_timestamp:?} \
+                 refresh_rate={refresh_rate}",
+            );
+        }
+
         core_ctx.send_tracking(TrackingData {
-            poll_timestamp: target_time,
+            poll_timestamp,
             device_motions,
             hand_skeletons: [
                 left_hand_data.skeleton_joints,

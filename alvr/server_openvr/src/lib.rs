@@ -16,7 +16,7 @@ use bindings::*;
 
 use alvr_common::{
     BUTTON_INFO, HAND_LEFT_ID, HAND_RIGHT_ID, HAND_TRACKER_LEFT_ID, HAND_TRACKER_RIGHT_ID, HEAD_ID,
-    Pose, ViewParams, error,
+    Pose, ViewParams, error, info,
     parking_lot::{Mutex, RwLock},
     settings_schema::Switch,
     warn,
@@ -29,7 +29,7 @@ use std::{
     collections::VecDeque,
     ffi::{CString, OsStr, c_char, c_void},
     ptr,
-    sync::{Once, mpsc},
+    sync::{LazyLock, Once, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -37,6 +37,81 @@ use std::{
 static SERVER_CORE_CONTEXT: RwLock<Option<ServerCoreContext>> = RwLock::new(None);
 static LOCAL_VIEW_PARAMS: RwLock<[ViewParams; 2]> = RwLock::new([ViewParams::DUMMY; 2]);
 static HEAD_POSE_QUEUE: Mutex<VecDeque<(Duration, Pose)>> = Mutex::new(VecDeque::new());
+static LAST_PREDICTION_DEBUG_LOG: LazyLock<Mutex<Instant>> =
+    LazyLock::new(|| Mutex::new(Instant::now()));
+static LAST_LOCAL_VIEW_DEBUG_LOG: LazyLock<Mutex<Instant>> =
+    LazyLock::new(|| Mutex::new(Instant::now()));
+static LAST_FRAME_VIEW_DEBUG_LOG: LazyLock<Mutex<Instant>> =
+    LazyLock::new(|| Mutex::new(Instant::now()));
+
+fn format_view_params(view: ViewParams) -> String {
+    format!(
+        "pos=[{:.4},{:.4},{:.4}] q=[{:.4},{:.4},{:.4},{:.4}] fov=[l:{:.1} r:{:.1} u:{:.1} d:{:.1}]",
+        view.pose.position.x,
+        view.pose.position.y,
+        view.pose.position.z,
+        view.pose.orientation.x,
+        view.pose.orientation.y,
+        view.pose.orientation.z,
+        view.pose.orientation.w,
+        view.fov.left.to_degrees(),
+        view.fov.right.to_degrees(),
+        view.fov.up.to_degrees(),
+        view.fov.down.to_degrees(),
+    )
+}
+
+fn format_pose(pose: Pose) -> String {
+    format!(
+        "pos=[{:.4},{:.4},{:.4}] q=[{:.4},{:.4},{:.4},{:.4}]",
+        pose.position.x,
+        pose.position.y,
+        pose.position.z,
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z,
+        pose.orientation.w,
+    )
+}
+
+fn should_log_prediction_debug() -> bool {
+    let now = Instant::now();
+    let mut last_log = LAST_PREDICTION_DEBUG_LOG.lock();
+
+    if *last_log + Duration::from_millis(500) < now {
+        *last_log = now;
+
+        true
+    } else {
+        false
+    }
+}
+
+fn should_log_local_view_debug() -> bool {
+    let now = Instant::now();
+    let mut last_log = LAST_LOCAL_VIEW_DEBUG_LOG.lock();
+
+    if *last_log + Duration::from_millis(1000) < now {
+        *last_log = now;
+
+        true
+    } else {
+        false
+    }
+}
+
+fn should_log_frame_view_debug() -> bool {
+    let now = Instant::now();
+    let mut last_log = LAST_FRAME_VIEW_DEBUG_LOG.lock();
+
+    if *last_log + Duration::from_millis(500) < now {
+        *last_log = now;
+
+        true
+    } else {
+        false
+    }
+}
 
 fn event_loop(events_receiver: mpsc::Receiver<ServerCoreEvent>) {
     thread::spawn(move || {
@@ -76,6 +151,14 @@ fn event_loop(events_receiver: mpsc::Receiver<ServerCoreEvent>) {
                 ServerCoreEvent::LocalViewParams(params) => unsafe {
                     *LOCAL_VIEW_PARAMS.write() = params;
 
+                    if should_log_local_view_debug() {
+                        info!(
+                            "YVR TRACE server local views: left={} right={}",
+                            format_view_params(params[0]),
+                            format_view_params(params[1]),
+                        );
+                    }
+
                     let ffi_params = [
                         tracking::to_ffi_view_params(params[0]),
                         tracking::to_ffi_view_params(params[1]),
@@ -95,12 +178,22 @@ fn event_loop(events_receiver: mpsc::Receiver<ServerCoreEvent>) {
                         .is_some_and(|c| c.detached_controllers_steamvr_sink);
 
                     if let Some(context) = &*SERVER_CORE_CONTEXT.read() {
-                        let target_timestamp =
-                            poll_timestamp + context.get_motion_to_photon_latency();
+                        let motion_to_photon_latency = context.get_motion_to_photon_latency();
+                        let target_timestamp = poll_timestamp + motion_to_photon_latency;
                         let controllers_pose_time_offset = context.get_tracker_pose_time_offset();
                         // We need to remove the additional offset that SteamVR adds
                         let target_controller_timestamp =
                             target_timestamp.saturating_sub(controllers_pose_time_offset);
+
+                        if should_log_prediction_debug() {
+                            info!(
+                                "YVR DEBUG server prediction: poll_timestamp={poll_timestamp:?} \
+                                 motion_to_photon={motion_to_photon_latency:?} \
+                                 target_timestamp={target_timestamp:?} \
+                                 controller_offset={controllers_pose_time_offset:?} \
+                                 controller_target={target_controller_timestamp:?}"
+                            );
+                        }
 
                         let ffi_head_motion = if let Some(motion) =
                             context.get_device_motion(*HEAD_ID, poll_timestamp)
@@ -399,6 +492,17 @@ extern "C" fn send_video(timestamp_ns: u64, buffer_ptr: *mut u8, len: i32, is_id
                 fov: local_views_params[1].fov,
             },
         ];
+
+        if should_log_frame_view_debug() {
+            info!(
+                "YVR TRACE server frame views: ts={timestamp:?} head={} local_l={} local_r={} global_l={} global_r={}",
+                format_pose(head_pose),
+                format_view_params(local_views_params[0]),
+                format_view_params(local_views_params[1]),
+                format_view_params(global_view_params[0]),
+                format_view_params(global_view_params[1]),
+            );
+        }
 
         context.send_video_nal(timestamp, global_view_params, is_idr, buffer.to_vec());
     }

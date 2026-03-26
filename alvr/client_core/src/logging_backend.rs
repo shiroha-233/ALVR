@@ -35,6 +35,9 @@ static LAST_LOG_EVENT: LazyLock<Mutex<RepeatedLogEvent>> = LazyLock::new(|| {
 
 pub fn init_logging() {
     fn send_log(record: &Record) -> bool {
+        let message = format!("{}", record.args());
+        let force_local_debug = message.contains("YVR TRACE") || message.contains("YVR DEBUG");
+
         let Some(data) = &*LOG_CHANNEL_SENDER.lock() else {
             // if channel has not been setup, always print everything to stdout
             // todo: the client debug groups settings should be moved client side when feasible
@@ -47,13 +50,13 @@ pub fn init_logging() {
             Level::Info => LogSeverity::Info,
             Level::Debug | Level::Trace => LogSeverity::Debug,
         };
-        if level < data.filter_level {
+        if !force_local_debug && level < data.filter_level {
             return false;
         }
 
-        let message = format!("{}", record.args());
-
-        if !alvr_common::filter_debug_groups(&message, &data.debug_groups_config) {
+        if !force_local_debug
+            && !alvr_common::filter_debug_groups(&message, &data.debug_groups_config)
+        {
             return false;
         }
 

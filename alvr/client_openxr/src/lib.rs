@@ -174,7 +174,18 @@ pub fn entry_point() {
         | Platform::Pico4Pro
         | Platform::Pico4Enterprise => ("_pico_old", LEGACY_OPENXR_VERSION),
         p if p.is_vive() => ("", LEGACY_OPENXR_VERSION),
-        p if p.is_yvr() => ("_yvr", LEGACY_OPENXR_VERSION),
+        p if p.is_yvr() => {
+            #[cfg(target_os = "android")]
+            let loader_suffix = if alvr_system_info::model_name() == "YVR 1" {
+                "_yvr1"
+            } else {
+                "_yvr"
+            };
+            #[cfg(not(target_os = "android"))]
+            let loader_suffix = "_yvr";
+
+            (loader_suffix, LEGACY_OPENXR_VERSION)
+        }
         Platform::Lynx => ("_lynx", LEGACY_OPENXR_VERSION),
         _ => ("", CURRENT_OPENXR_VERSION),
     };

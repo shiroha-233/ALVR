@@ -18,8 +18,9 @@ mod audio;
 pub mod video_decoder;
 
 use alvr_common::{
-    ConnectionState, LifecycleState, ViewParams, dbg_client_core, error,
-    glam::{UVec2, Vec2},
+    ConnectionState, Fov, LifecycleState, Pose, ViewParams, dbg_client_core, error,
+    glam::{Quat, UVec2, Vec2, Vec3},
+    info,
     parking_lot::{Mutex, RwLock},
     warn,
 };
@@ -31,13 +32,46 @@ use alvr_system_info::Platform;
 use connection::{ConnectionContext, DecoderCallback};
 use std::{
     collections::{HashSet, VecDeque},
-    sync::Arc,
+    sync::{Arc, LazyLock},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use storage::Config;
 
 pub use logging_backend::init_logging;
+
+const YVR_VIEW_LOG_INTERVAL: Duration = Duration::from_millis(1000);
+static LAST_YVR_VIEW_LOG: LazyLock<Mutex<Instant>> = LazyLock::new(|| Mutex::new(Instant::now()));
+
+fn should_log_yvr_view_params() -> bool {
+    let now = Instant::now();
+    let mut last_log = LAST_YVR_VIEW_LOG.lock();
+
+    if *last_log + YVR_VIEW_LOG_INTERVAL < now {
+        *last_log = now;
+
+        true
+    } else {
+        false
+    }
+}
+
+fn format_view_params(view: ViewParams) -> String {
+    format!(
+        "pos=[{:.4},{:.4},{:.4}] q=[{:.4},{:.4},{:.4},{:.4}] fov=[l:{:.1} r:{:.1} u:{:.1} d:{:.1}]",
+        view.pose.position.x,
+        view.pose.position.y,
+        view.pose.position.z,
+        view.pose.orientation.x,
+        view.pose.orientation.y,
+        view.pose.orientation.z,
+        view.pose.orientation.w,
+        view.fov.left.to_degrees(),
+        view.fov.right.to_degrees(),
+        view.fov.up.to_degrees(),
+        view.fov.down.to_degrees(),
+    )
+}
 
 pub enum ClientCoreEvent {
     UpdateHudMessage(String),
@@ -209,9 +243,24 @@ impl ClientCoreContext {
     pub fn send_view_params(&self, views: [ViewParams; 2]) {
         dbg_client_core!("send_view_params");
 
+        let views_openvr = [
+            canted_view_to_proportional_circumscribed_orthogonal(views[0], 1.0),
+            canted_view_to_proportional_circumscribed_orthogonal(views[1], 1.0),
+        ];
+
+        if self.platform.is_yvr() && should_log_yvr_view_params() {
+            info!(
+                "YVR TRACE client local views: raw_l={} raw_r={} openvr_l={} openvr_r={}",
+                format_view_params(views[0]),
+                format_view_params(views[1]),
+                format_view_params(views_openvr[0]),
+                format_view_params(views_openvr[1]),
+            );
+        }
+
         if let Some(sender) = &mut *self.connection_context.control_sender.lock() {
             sender
-                .send(&ClientControlPacket::LocalViewParams(views))
+                .send(&ClientControlPacket::LocalViewParams(views_openvr))
                 .ok();
         }
     }
@@ -326,5 +375,69 @@ impl Drop for ClientCoreContext {
 
         #[cfg(target_os = "android")]
         alvr_system_info::set_wifi_lock(false);
+    }
+}
+
+fn canted_view_to_proportional_circumscribed_orthogonal(
+    view_canted: ViewParams,
+    fov_post_scale: f32,
+) -> ViewParams {
+    let viewpose_orth = Pose {
+        orientation: Quat::IDENTITY,
+        position: view_canted.pose.position,
+    };
+
+    let v0 = Vec3::new(view_canted.fov.left, view_canted.fov.down, -1.0);
+    let v1 = Vec3::new(view_canted.fov.right, view_canted.fov.down, -1.0);
+    let v2 = Vec3::new(view_canted.fov.right, view_canted.fov.up, -1.0);
+    let v3 = Vec3::new(view_canted.fov.left, view_canted.fov.up, -1.0);
+
+    let w0 = view_canted.pose.orientation * v0;
+    let w1 = view_canted.pose.orientation * v1;
+    let w2 = view_canted.pose.orientation * v2;
+    let w3 = view_canted.pose.orientation * v3;
+
+    let pt0 = Vec2::new(w0.x * (-1.0 / w0.z), w0.y * (-1.0 / w0.z));
+    let pt1 = Vec2::new(w1.x * (-1.0 / w1.z), w1.y * (-1.0 / w1.z));
+    let pt2 = Vec2::new(w2.x * (-1.0 / w2.z), w2.y * (-1.0 / w2.z));
+    let pt3 = Vec2::new(w3.x * (-1.0 / w3.z), w3.y * (-1.0 / w3.z));
+
+    let pts_x = [pt0.x, pt1.x, pt2.x, pt3.x];
+    let pts_y = [pt0.y, pt1.y, pt2.y, pt3.y];
+    let inscribed_left = pts_x.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+    let inscribed_right = pts_x.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    let inscribed_up = pts_y.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    let inscribed_down = pts_y.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+
+    let fov_orth = Fov {
+        left: inscribed_left,
+        right: inscribed_right,
+        up: inscribed_up,
+        down: inscribed_down,
+    };
+
+    let fov_orth_width = fov_orth.right.abs() + fov_orth.left.abs();
+    let fov_orth_height = fov_orth.up.abs() + fov_orth.down.abs();
+    let fov_orig_width = view_canted.fov.right.abs() + view_canted.fov.left.abs();
+    let fov_orig_height = view_canted.fov.up.abs() + view_canted.fov.down.abs();
+    let scales = [
+        fov_orth_width / fov_orig_width,
+        fov_orth_height / fov_orig_height,
+    ];
+
+    let fov_inscribe_scale = scales
+        .iter()
+        .fold(f32::NEG_INFINITY, |a, &b| a.max(b))
+        .max(1.0);
+    let fov_orth_corrected = Fov {
+        left: view_canted.fov.left * fov_inscribe_scale * fov_post_scale,
+        right: view_canted.fov.right * fov_inscribe_scale * fov_post_scale,
+        up: view_canted.fov.up * fov_inscribe_scale * fov_post_scale,
+        down: view_canted.fov.down * fov_inscribe_scale * fov_post_scale,
+    };
+
+    ViewParams {
+        pose: viewpose_orth,
+        fov: fov_orth_corrected,
     }
 }
