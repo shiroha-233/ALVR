@@ -84,4 +84,8 @@ try {
     throw
 }
 
-Write-Host "Pushed tag '$Tag' to '$Remote'. GitHub Actions should now start the release workflow."
+if ($WhatIfPreference) {
+    Write-Host "Dry run completed for tag '$Tag'. No branch or tag was pushed."
+} else {
+    Write-Host "Pushed tag '$Tag' to '$Remote'. GitHub Actions should now start the release workflow."
+}
