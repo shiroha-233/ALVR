@@ -25,26 +25,40 @@ function Invoke-Git {
     }
 }
 
+function Get-GitOutput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $output = @(& git @Arguments)
+    if ($LASTEXITCODE -ne 0) {
+        throw "git $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
+    }
+
+    return ($output -join "`n").Trim()
+}
+
 if ($Tag -notmatch "^v") {
     throw "Tag '$Tag' does not match the release workflow. Please use a tag starting with 'v'."
 }
 
-$branch = (& git branch --show-current).Trim()
+$branch = Get-GitOutput -Arguments @("branch", "--show-current")
 if (-not $branch) {
     throw "Detached HEAD is not supported. Please checkout a branch first."
 }
 
-$status = (& git status --porcelain=v1).Trim()
+$status = Get-GitOutput -Arguments @("status", "--porcelain=v1")
 if ($status) {
     throw "Working tree is not clean. Commit or stash changes before pushing a release tag."
 }
 
-$localTag = (& git tag --list $Tag).Trim()
+$localTag = Get-GitOutput -Arguments @("tag", "--list", $Tag)
 if ($localTag) {
     throw "Local tag '$Tag' already exists."
 }
 
-$remoteTag = (& git ls-remote --tags $Remote "refs/tags/$Tag").Trim()
+$remoteTag = Get-GitOutput -Arguments @("ls-remote", "--tags", $Remote, "refs/tags/$Tag")
 if ($remoteTag) {
     throw "Remote tag '$Tag' already exists on '$Remote'."
 }
