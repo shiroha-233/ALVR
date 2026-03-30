@@ -22,13 +22,20 @@ pub fn generate_licenses() -> String {
         .unwrap();
 
     let licenses_template = afs::crate_dir("xtask").join("licenses_template.hbs");
+    let temp_dir = sh.create_temp_dir().unwrap();
+    let output_path = temp_dir.path().join("dependencies.html");
 
-    cmd!(sh, "cargo about generate {licenses_template}")
-        .read()
-        .unwrap()
+    cmd!(
+        sh,
+        "cargo about generate {licenses_template} -o {output_path}"
+    )
+    .run()
+    .unwrap();
+
+    fs::read_to_string(output_path).unwrap()
 }
 
-pub fn include_licenses(root_path: &Path, gpl: bool) {
+pub fn include_licenses(root_path: &Path, gpl: bool, include_windows_libvpl: bool) {
     let sh = Shell::new().unwrap();
 
     // Add licenses
@@ -51,7 +58,7 @@ pub fn include_licenses(root_path: &Path, gpl: bool) {
         )
         .ok();
     }
-    if cfg!(windows) {
+    if cfg!(windows) && include_windows_libvpl {
         sh.copy_file(
             afs::deps_dir().join("windows/libvpl/alvr_build/share/vpl/licensing/license.txt"),
             licenses_dir.join("libvpl.txt"),
@@ -77,7 +84,7 @@ pub fn package_streamer(
 
     build::build_streamer(Profile::Distribution, gpl, root, true, false, false);
 
-    include_licenses(&afs::streamer_build_dir(), gpl);
+    include_licenses(&afs::streamer_build_dir(), gpl, cfg!(windows));
 
     if cfg!(windows) {
         command::zip(&sh, &afs::streamer_build_dir()).unwrap();
@@ -93,7 +100,7 @@ pub fn package_launcher() {
 
     build::build_launcher(Profile::Distribution, true);
 
-    include_licenses(&afs::launcher_build_dir(), false);
+    include_licenses(&afs::launcher_build_dir(), false, false);
 
     if cfg!(windows) {
         command::zip(&sh, &afs::launcher_build_dir()).unwrap();

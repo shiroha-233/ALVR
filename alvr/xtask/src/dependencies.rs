@@ -1,6 +1,9 @@
 use crate::{BuildPlatform, command};
 use alvr_filesystem as afs;
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use xshell::{Shell, cmd};
 
 pub enum OpenXRLoadersSelection {
@@ -311,13 +314,26 @@ pub fn prepare_server_deps(
     }
 }
 
+fn android_openxr_loader_dir() -> PathBuf {
+    afs::deps_dir().join("android_openxr/arm64-v8a")
+}
+
+fn copy_android_openxr_loader_alias(source_name: &str, target_name: &str) {
+    let loader_dir = android_openxr_loader_dir();
+    fs::copy(
+        loader_dir.join(format!("libopenxr_loader{source_name}.so")),
+        loader_dir.join(format!("libopenxr_loader{target_name}.so")),
+    )
+    .unwrap();
+}
+
 fn get_android_openxr_loaders(selection: OpenXRLoadersSelection) {
     fn get_openxr_loader(name: &str, url: &str, source_dir: &str) {
         let sh = Shell::new().unwrap();
         let temp_dir = afs::build_dir().join("temp_download");
         sh.remove_path(&temp_dir).ok();
         sh.create_dir(&temp_dir).unwrap();
-        let destination_dir = afs::deps_dir().join("android_openxr/arm64-v8a");
+        let destination_dir = android_openxr_loader_dir();
         fs::create_dir_all(&destination_dir).unwrap();
 
         command::download_and_extract_zip(url, &temp_dir).unwrap();
@@ -338,6 +354,7 @@ fn get_android_openxr_loaders(selection: OpenXRLoadersSelection) {
         ),
         "prefab/modules/openxr_loader/libs/android.arm64-v8a",
     );
+    copy_android_openxr_loader_alias("", "_lynx");
 
     if matches!(selection, OpenXRLoadersSelection::OnlyGeneric) {
         return;
@@ -364,12 +381,7 @@ fn get_android_openxr_loaders(selection: OpenXRLoadersSelection) {
         "https://developer.yvrdream.com/yvrdoc/sdk/openxr/yvr_openxr_mobile_sdk_2.0.0.zip",
         "yvr_openxr_mobile_sdk_2.0.0/OpenXR/Libs/Android/arm64-v8a",
     );
-
-    get_openxr_loader(
-        "_lynx",
-        "https://portal.lynx-r.com/downloads/download/16", // version 1.0.0
-        "jni/arm64-v8a",
-    );
+    copy_android_openxr_loader_alias("_yvr", "_yvr1");
 }
 
 pub fn build_android_deps(
